@@ -33,7 +33,7 @@ public class PrimalTool {
     private ResultSet rs=null;
     private PreparedStatement preparedStmt = null;
 
-    public void connectDatabase(String dbConnString, String dbUser, String dbPassword) {
+    private void connectDatabase(String dbConnString, String dbUser, String dbPassword) {
 
         try {
 
@@ -49,7 +49,7 @@ public class PrimalTool {
         }
     }
 
-    public void closeDatabase() {
+    private void closeDatabase() {
 
         try {
             if (conn != null)
@@ -61,6 +61,7 @@ public class PrimalTool {
 
     public static void main(String[] args) {
 
+        String test="";
 
         Configurations configs = new Configurations();
         try {
@@ -149,7 +150,7 @@ public class PrimalTool {
 
     }
 
-    public int addRoute(Route route) {
+    private int addRoute(Route route) {
 
 
         try {
@@ -260,13 +261,12 @@ public class PrimalTool {
 
     public void loadPrimalRateTables(String rateTableFile) throws Exception {
 
-        String csvFile = rateTableFile;
-        BufferedReader br = null;
+
         String line = "";
         String cvsSplitBy = ",";
 
 
-        br = new BufferedReader(new FileReader(csvFile));
+        BufferedReader br = new BufferedReader(new FileReader(rateTableFile));
         br.readLine();
 
         while ((line = br.readLine()) != null) {
@@ -300,7 +300,7 @@ public class PrimalTool {
                 continue;
             }
 
-            BigDecimal cpi = new BigDecimal(rateTable.getRate().substring(1)).multiply(new BigDecimal("10000")).setScale(4);
+            BigDecimal cpi = new BigDecimal(rateTable.getRate().substring(1)).multiply(new BigDecimal("10000")).setScale(4, BigDecimal.ROUND_HALF_UP);
             route.setCpi1(cpi.intValue());
 
             if( (rateTable.getRatePlan13().compareToIgnoreCase(rateTable.getRatePlan14()) == 0)
