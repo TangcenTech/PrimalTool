@@ -75,11 +75,15 @@ public class PrimalTool {
 
             dbConnString="jdbc:mysql://"+dbHost+":"+dbPort+"/ustax";
             dbConnString="jdbc:oracle:thin:@192.168.0.190:1521:orcl";
+            dbUser = "ssi";
+            dbPassword = "1234";
 
             PrimalTool primalTool = new PrimalTool();
 
             primalTool.connectDatabase(dbConnString, dbUser, dbPassword);
-            primalTool.loadPrimalRateTables("c:\\primal\\20180125_SSiMobile_OCS_rateTableStatic_v5.csv");
+            //primalTool.loadPrimalRateTables("c:\\primal\\20180125_SSiMobile_OCS_rateTableStatic_v5.csv");
+            primalTool.generateSubscriberInfo();
+
             primalTool.closeDatabase();
 
         } catch (Exception e) {
@@ -347,4 +351,53 @@ public class PrimalTool {
 
     }
 
+    public int generateSubscriberInfo() {
+        try {
+
+            StringBuffer sub = new StringBuffer();
+
+            String query = "select D.clientid,D.firstname,D.lastname,D.mdn, D.msid,D.passwords,D.emailaddress,D.template,E.fieldcontent "
+                    + " from "
+                    + "(SELECT a.clientid,b.firstname,b.lastname,a.mdn,a.msid,a.passwords,a.emailaddress,b.template "
+                        + "FROM client a,contactdata b,um_subscriber c "
+                        + "WHERE a.clientid=b.userid and a.clientid=c.clientid) D "
+                        + " left outer join (select clientid,fieldcontent from customfield) E on D.clientid=E.clientid";
+            preparedStmt = conn.prepareStatement(query);
+            ResultSet rs = preparedStmt.executeQuery();
+            while(rs.next()) {
+
+                for(int i = 0; i< 9 ; i++) {
+                    sub.append(rs.getString(i+1) == null ? "," : rs.getString(i+1) + ",");
+                }
+                sub.append("\n");
+
+            }
+
+            preparedStmt.close();
+            System.out.println(sub);
+
+        } catch (Exception e) {
+
+            logger.error(e.getMessage());
+
+        }finally {
+
+            try {
+
+                if( rs != null)
+                    rs.close();
+                if(stmt != null)
+                    stmt.close();
+                if(preparedStmt != null )
+                    preparedStmt.close();
+
+            }catch ( Exception e){
+
+                logger.error(e.getMessage());
+            }
+        }
+
+
+        return 1;
+    }
 }
