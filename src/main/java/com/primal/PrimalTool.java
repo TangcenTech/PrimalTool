@@ -9,7 +9,9 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.math.BigDecimal;
 import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 
 
@@ -78,11 +80,16 @@ public class PrimalTool {
             dbUser = "ssi";
             dbPassword = "1234";
 
+            int balance =16451;
+            double x = balance/10000.0;
+            System.out.print(x);
+
             PrimalTool primalTool = new PrimalTool();
 
             primalTool.connectDatabase(dbConnString, dbUser, dbPassword);
             //primalTool.loadPrimalRateTables("c:\\primal\\20180125_SSiMobile_OCS_rateTableStatic_v5.csv");
-            primalTool.generateSubscriberInfo();
+            //primalTool.generateSubscriberInfo();
+            primalTool.generateAASM();
 
             primalTool.closeDatabase();
 
@@ -351,30 +358,118 @@ public class PrimalTool {
 
     }
 
-    public int generateSubscriberInfo() {
+    public int generateAASM() {
         try {
 
-            StringBuffer sub = new StringBuffer();
+            AccountActivitySummary accountActivitySummary = new AccountActivitySummary();
+            AccountActivitySummary accountActivityMonthSummary = new AccountActivitySummary();
 
-            String query = "select D.clientid,D.firstname,D.lastname,D.mdn, D.msid,D.passwords,D.emailaddress,D.template,E.fieldcontent "
-                    + " from "
-                    + "(SELECT a.clientid,b.firstname,b.lastname,a.mdn,a.msid,a.passwords,a.emailaddress,b.template "
-                        + "FROM client a,contactdata b,um_subscriber c "
-                        + "WHERE a.clientid=b.userid and a.clientid=c.clientid) D "
-                        + " left outer join (select clientid,fieldcontent from customfield) E on D.clientid=E.clientid";
+            Calendar cal = Calendar.getInstance();
+            cal.add(Calendar.MONTH, -1);
+
+            int month = cal.get(Calendar.MONTH) + 1; // beware of month indexing from zero
+            int year  = cal.get(Calendar.YEAR);
+
+            StringBuffer aasm = new StringBuffer();
+
+            aasm.append("AccountID,BillingID,MDN,MDN2,MSID(MIN),ESN(IMSI),CDRs,AirTime,AirTimeBilled,Revenue,"
+                    + "Adjustments,PrePaid Recharge,Credit Recharge,Expired Balance,LastCall,LastBalance,"
+                    + "StartingBalance,ActivationDate,ExpiryDate,Template,RatePlanID,AccountStatus\r\n");
+
+            String query = String.format("select a.accountid,a.billingid,a.mdn,a.secondphone,a.msid,a.esn,cdrs,airtimes,"
+             + "airtimesbilled,costs,adjustment,prepaidrecharge,creditrecharge,expiredcharge,"
+             + "lastcall,b.lastbalance,startingbalance,a.activationdate,a.expirydate,a.template,a.rateplanid,a.status "
+             + " from (select c.accountid,d.mdn,d.secondphone,d.msid,d.esn,d.billingid,e.template,c.lastbalance,c.expirydate,c.activationdate,c.rateplanid,c.status "
+             + " from client d,contactdata e,bc_account c "
+             + " where d.clientid = e.userid and d.clientid = c.accountid ) a "
+             + " left outer join (select * from cdr_aas where substr(cdrdate,0,7) = '%04d/%02d' order by accountid ,cdrdate asc) b on a.accountid = b.accountid", year, month);
+
             preparedStmt = conn.prepareStatement(query);
             ResultSet rs = preparedStmt.executeQuery();
             while(rs.next()) {
 
-                for(int i = 0; i< 9 ; i++) {
-                    sub.append(rs.getString(i+1) == null ? "," : rs.getString(i+1) + ",");
+                int i=1;
+                accountActivitySummary.setAccountId(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setBillingId(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setMdn(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setMdn2(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setMsid(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setEsn(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setCdr(rs.getInt(i));
+                i++;
+                accountActivitySummary.setAirTime(rs.getInt(i));
+                i++;
+                accountActivitySummary.setAirTimeBilled(rs.getInt(i));
+                i++;
+                accountActivitySummary.setRevence(rs.getInt(i));
+                i++;
+                accountActivitySummary.setAdjustment(rs.getInt(i));
+                i++;
+                accountActivitySummary.setPrepaidRecharge(rs.getInt(i));
+                i++;
+                accountActivitySummary.setCreditRecharge(rs.getInt(i));
+                i++;
+                accountActivitySummary.setExpiredBalance(rs.getInt(i));
+                i++;
+                accountActivitySummary.setLastCall(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setLastBalance(rs.getInt(i));
+                i++;
+                accountActivitySummary.setStartingBalance(rs.getInt(i));
+                i++;
+                accountActivitySummary.setActivationDate(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setExpiryDate(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setTemplate(rs.getString(i) == null ? "" : rs.getString(i));
+                i++;
+                accountActivitySummary.setRateplanId(rs.getInt(i));
+                i++;
+                accountActivitySummary.setStatus(rs.getInt(i));
+
+                if (accountActivityMonthSummary.getAccountId() == null ) {
+
+                    accountActivityMonthSummary = accountActivitySummary;
                 }
-                sub.append("\n");
+                else if (accountActivityMonthSummary.getAccountId().compareTo(accountActivitySummary.getAccountId()) != 0)  {
+
+                    accountActivityMonthSummary = accountActivitySummary;
+                }
+                else {
+                    // same account with monthly summary
+                    accountActivityMonthSummary.setCdr(accountActivityMonthSummary.getCdr() + accountActivitySummary.getCdr());
+                    accountActivityMonthSummary.setRevence(accountActivityMonthSummary.getRevence() + accountActivitySummary.getRevence());
+                    accountActivityMonthSummary.setExpiredBalance(accountActivityMonthSummary.getExpiredBalance() + accountActivitySummary.getExpiredBalance());
+                    accountActivityMonthSummary.setAdjustment(accountActivityMonthSummary.getAdjustment() + accountActivitySummary.getAdjustment());
+                    accountActivityMonthSummary.setAirTime(accountActivityMonthSummary.getAirTime() + accountActivitySummary.getAirTime());
+                    accountActivityMonthSummary.setAirTimeBilled(accountActivityMonthSummary.getAirTimeBilled() + accountActivitySummary.getAirTimeBilled());
+                    accountActivityMonthSummary.setPrepaidRecharge(accountActivityMonthSummary.getPrepaidRecharge() + accountActivitySummary.getPrepaidRecharge());
+                    accountActivityMonthSummary.setCreditRecharge(accountActivityMonthSummary.getCreditRecharge() + accountActivitySummary.getCreditRecharge());
+                    accountActivityMonthSummary.setLastBalance(accountActivitySummary.getLastBalance());
+
+                    if ((accountActivitySummary.getLastCall().compareToIgnoreCase("NoCalls") != 0) && (accountActivitySummary.getLastCall().length() > 0)){
+                        accountActivityMonthSummary.setLastCall(accountActivitySummary.getLastCall());
+                    }
+
+
+                }
 
             }
 
             preparedStmt.close();
-            System.out.println(sub);
+
+            String reportFileName = String.format("/logs/reportfiles/AASM%04d%02d.txt", year, month );
+
+            //System.out.println(sub);
+            writeFile(reportFileName, aasm.toString());
+
+            addReportFile(reportFileName, 5);
 
         } catch (Exception e) {
 
@@ -399,5 +494,141 @@ public class PrimalTool {
 
 
         return 1;
+    }
+
+    public int generateSubscriberInfo() {
+        try {
+
+            StringBuffer sub = new StringBuffer();
+
+            sub.append("ClientID,FirstName,LastName,MDN,MSID(MIN),Passwords,EmailAddress,TypeofService,CompanyName\r\n");
+            String query = "select D.clientid,D.firstname,D.lastname,D.mdn, D.msid,D.passwords,D.emailaddress,D.template,E.fieldcontent "
+                    + " from "
+                    + "(SELECT a.clientid,b.firstname,b.lastname,a.mdn,a.msid,a.passwords,a.emailaddress,b.template "
+                        + "FROM client a,contactdata b,um_subscriber c "
+                        + "WHERE a.clientid=b.userid and a.clientid=c.clientid) D "
+                        + " left outer join (select clientid,fieldcontent from customfield) E on D.clientid=E.clientid";
+            preparedStmt = conn.prepareStatement(query);
+            ResultSet rs = preparedStmt.executeQuery();
+            while(rs.next()) {
+
+                for(int i = 0; i< 9 ; i++) {
+                    sub.append(rs.getString(i+1) == null ? "," : rs.getString(i+1) + ",");
+                }
+                sub.append("\r\n");
+
+            }
+
+            preparedStmt.close();
+
+            String reportDate = new SimpleDateFormat("yyyyMMdd").format(new java.util.Date());
+            String reportFileName = String.format("/logs/reportfiles/SubscriberInfor%s.txt", new SimpleDateFormat("yyyyMMdd").format(new java.util.Date()));
+
+            //System.out.println(sub);
+            writeFile(reportFileName, sub.toString());
+
+            addReportFile(reportFileName, 17);
+
+        } catch (Exception e) {
+
+            logger.error(e.getMessage());
+
+        }finally {
+
+            try {
+
+                if( rs != null)
+                    rs.close();
+                if(stmt != null)
+                    stmt.close();
+                if(preparedStmt != null )
+                    preparedStmt.close();
+
+            }catch ( Exception e){
+
+                logger.error(e.getMessage());
+            }
+        }
+
+
+        return 1;
+    }
+
+    public int addReportFile(String reportFileName, int reportType) {
+
+
+        try {
+
+            File reportFile = new File(reportFileName);
+
+            reportFile.length();
+
+            String query = "insert into dbm_report (dbmDateTime, ReportFile, ReportType, FileSize) values (?,?,?,?)";
+
+            String timeStamp = new SimpleDateFormat("yyyy/MM/dd-HH:mm:ss").format(new java.util.Date());
+
+            preparedStmt = conn.prepareStatement(query);
+            preparedStmt.setString(1, timeStamp);
+            preparedStmt.setString(2, reportFileName);
+            preparedStmt.setInt(3, reportType);
+            preparedStmt.setLong(4, reportFile.length());
+
+            preparedStmt.executeUpdate();
+
+
+        } catch (Exception e) {
+
+            logger.error(e.getMessage());
+
+        }finally {
+
+            try {
+
+                if( rs != null)
+                    rs.close();
+                if(stmt != null)
+                    stmt.close();
+                if(preparedStmt != null )
+                    preparedStmt.close();
+
+            }catch ( Exception e){
+
+                logger.error(e.getMessage());
+            }
+        }
+
+
+        return 1;
+
+    }
+
+    public static void writeFile(String fileName, String fileContent) {
+
+        BufferedWriter bw=null;
+        FileWriter fw=null;
+
+        try {
+
+            fw = new FileWriter(fileName);
+            bw = new BufferedWriter(fw);
+            bw.write(fileContent);
+
+        }catch ( IOException e) {
+            logger.error(e.getMessage());
+        }finally {
+            try {
+
+                if (bw != null)
+                    bw.close();
+
+                if (fw != null)
+                    fw.close();
+
+            } catch (IOException e) {
+
+                logger.error(e.getMessage());
+
+            }
+        }
     }
 }
