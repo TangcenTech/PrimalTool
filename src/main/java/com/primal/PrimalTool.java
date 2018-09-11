@@ -1,5 +1,7 @@
 package com.primal;
 
+import com.primal.model.AccountActivitySummary;
+import com.primal.model.AccountUsageSummary;
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
 
@@ -10,9 +12,7 @@ import java.io.*;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.List;
 
 
 public class PrimalTool {
@@ -34,6 +34,10 @@ public class PrimalTool {
     private Connection conn=null;
     private ResultSet rs=null;
     private PreparedStatement preparedStmt = null;
+
+    private static final String reportLocation = "/logs/reportfiles/";
+    private static final int REPORT_TYPE_AASM = 5;
+
 
     private void connectDatabase(String dbConnString, String dbUser, String dbPassword) {
 
@@ -89,7 +93,14 @@ public class PrimalTool {
             primalTool.connectDatabase(dbConnString, dbUser, dbPassword);
             //primalTool.loadPrimalRateTables("c:\\primal\\20180125_SSiMobile_OCS_rateTableStatic_v5.csv");
             //primalTool.generateSubscriberInfo();
-            primalTool.generateAASM();
+
+            Calendar cal = Calendar.getInstance();
+            int day = cal.get(Calendar.DAY_OF_MONTH);
+            cal.add(Calendar.MONTH, -1);
+            int month = cal.get(Calendar.MONTH) + 1; // beware of month indexing from zero
+            int year  = cal.get(Calendar.YEAR);
+
+            primalTool.generateAASM(year, month);
 
             primalTool.closeDatabase();
 
@@ -278,7 +289,7 @@ public class PrimalTool {
 
 
         BufferedReader br = new BufferedReader(new FileReader(rateTableFile));
-        br.readLine();
+        br.readLine(); // ignore the header line
 
         while ((line = br.readLine()) != null) {
 
@@ -323,7 +334,7 @@ public class PrimalTool {
                     continue;
                 }
 
-                route.setRateplanId(0);
+                route.setRateplanId(0); // rate plan 0
                 setRoute(route, rateTable.getRatePlan13());
                 addRoute(route);
 
@@ -358,142 +369,389 @@ public class PrimalTool {
 
     }
 
-    public int generateAASM() {
-        try {
+    public int generateAASM( int year, int month) throws SQLException, CloneNotSupportedException {
 
-            AccountActivitySummary accountActivitySummary = new AccountActivitySummary();
-            AccountActivitySummary accountActivityMonthSummary = new AccountActivitySummary();
+        AccountActivitySummary accountActivitySummary = new AccountActivitySummary();
+        AccountActivitySummary accountActivityMonthSummary = new AccountActivitySummary();
 
-            Calendar cal = Calendar.getInstance();
-            cal.add(Calendar.MONTH, -1);
+//            Calendar cal = Calendar.getInstance();
+//            cal.add(Calendar.MONTH, -1);
+//
+//            int month = cal.get(Calendar.MONTH) + 1; // beware of month indexing from zero
+//            int year  = cal.get(Calendar.YEAR);
+//            int day = cal.get(Calendar.DAY_OF_MONTH);
 
-            int month = cal.get(Calendar.MONTH) + 1; // beware of month indexing from zero
-            int year  = cal.get(Calendar.YEAR);
+        StringBuffer aasm = new StringBuffer();
 
-            StringBuffer aasm = new StringBuffer();
+        aasm.append("AccountID,BillingID,MDN,MDN2,MSID(MIN),ESN(IMSI),CDRs,AirTime,AirTimeBilled,Revenue,"
+                + "Adjustments,PrePaid Recharge,Credit Recharge,Expired Balance,LastCall,LastBalance,"
+                + "StartingBalance,ActivationDate,ExpiryDate,Template,RatePlanID,AccountStatus\r\n");
 
-            aasm.append("AccountID,BillingID,MDN,MDN2,MSID(MIN),ESN(IMSI),CDRs,AirTime,AirTimeBilled,Revenue,"
-                    + "Adjustments,PrePaid Recharge,Credit Recharge,Expired Balance,LastCall,LastBalance,"
-                    + "StartingBalance,ActivationDate,ExpiryDate,Template,RatePlanID,AccountStatus\r\n");
+        String query = String.format("select a.accountid,a.billingid,a.mdn,a.secondphone,a.msid,a.esn,cdrs,airtimes,"
+                + "airtimesbilled,costs,adjustment,prepaidrecharge,creditrecharge,expiredcharge,"
+                + "lastcall,b.lastbalance,startingbalance,a.activationdate,a.expirydate,a.template,a.rateplanid,a.status "
+                + " from (select c.accountid,d.mdn,d.secondphone,d.msid,d.esn,d.billingid,e.template,c.lastbalance,c.expirydate,c.activationdate,c.rateplanid,c.status "
+                + " from client d,contactdata e,bc_account c "
+                + " where d.clientid = e.userid and d.clientid = c.accountid ) a "
+                + " left outer join (select * from cdr_aas where substr(cdrdate,0,7) = '%04d/%02d' order by accountid ,cdrdate asc) b on a.accountid = b.accountid", year, month);
 
-            String query = String.format("select a.accountid,a.billingid,a.mdn,a.secondphone,a.msid,a.esn,cdrs,airtimes,"
-             + "airtimesbilled,costs,adjustment,prepaidrecharge,creditrecharge,expiredcharge,"
-             + "lastcall,b.lastbalance,startingbalance,a.activationdate,a.expirydate,a.template,a.rateplanid,a.status "
-             + " from (select c.accountid,d.mdn,d.secondphone,d.msid,d.esn,d.billingid,e.template,c.lastbalance,c.expirydate,c.activationdate,c.rateplanid,c.status "
-             + " from client d,contactdata e,bc_account c "
-             + " where d.clientid = e.userid and d.clientid = c.accountid ) a "
-             + " left outer join (select * from cdr_aas where substr(cdrdate,0,7) = '%04d/%02d' order by accountid ,cdrdate asc) b on a.accountid = b.accountid", year, month);
 
-            preparedStmt = conn.prepareStatement(query);
-            ResultSet rs = preparedStmt.executeQuery();
-            while(rs.next()) {
+        preparedStmt = conn.prepareStatement(query);
+        ResultSet rs = preparedStmt.executeQuery();
+        while(rs.next()) {
 
-                int i=1;
-                accountActivitySummary.setAccountId(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setBillingId(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setMdn(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setMdn2(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setMsid(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setEsn(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setCdr(rs.getInt(i));
-                i++;
-                accountActivitySummary.setAirTime(rs.getInt(i));
-                i++;
-                accountActivitySummary.setAirTimeBilled(rs.getInt(i));
-                i++;
-                accountActivitySummary.setRevence(rs.getInt(i));
-                i++;
-                accountActivitySummary.setAdjustment(rs.getInt(i));
-                i++;
-                accountActivitySummary.setPrepaidRecharge(rs.getInt(i));
-                i++;
-                accountActivitySummary.setCreditRecharge(rs.getInt(i));
-                i++;
-                accountActivitySummary.setExpiredBalance(rs.getInt(i));
-                i++;
-                accountActivitySummary.setLastCall(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setLastBalance(rs.getInt(i));
-                i++;
-                accountActivitySummary.setStartingBalance(rs.getInt(i));
-                i++;
-                accountActivitySummary.setActivationDate(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setExpiryDate(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setTemplate(rs.getString(i) == null ? "" : rs.getString(i));
-                i++;
-                accountActivitySummary.setRateplanId(rs.getInt(i));
-                i++;
-                accountActivitySummary.setStatus(rs.getInt(i));
+            int i=1;
+            accountActivitySummary.setAccountId(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setBillingId(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setMdn(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setMdn2(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setMsid(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setEsn(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setCdr(rs.getInt(i));
+            i++;
+            accountActivitySummary.setAirTime(rs.getInt(i));
+            i++;
+            accountActivitySummary.setAirTimeBilled(rs.getInt(i));
+            i++;
+            accountActivitySummary.setRevence(rs.getInt(i));
+            i++;
+            accountActivitySummary.setAdjustment(rs.getInt(i));
+            i++;
+            accountActivitySummary.setPrepaidRecharge(rs.getInt(i));
+            i++;
+            accountActivitySummary.setCreditRecharge(rs.getInt(i));
+            i++;
+            accountActivitySummary.setExpiredBalance(rs.getInt(i));
+            i++;
+            accountActivitySummary.setLastCall(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setLastBalance(rs.getInt(i));
+            i++;
+            accountActivitySummary.setStartingBalance(rs.getInt(i));
+            i++;
+            accountActivitySummary.setActivationDate(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setExpiryDate(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setTemplate(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setRateplanId(rs.getInt(i));
+            i++;
+            accountActivitySummary.setStatus(rs.getInt(i));
 
-                if (accountActivityMonthSummary.getAccountId() == null ) {
+            logger.info("dailyAAS accountId=" + accountActivitySummary.getAccountId() + ",monthlyAAS accountId=" + accountActivityMonthSummary.getAccountId());
 
-                    accountActivityMonthSummary = accountActivitySummary;
+            if (accountActivityMonthSummary.getAccountId().length() == 0 ) {
+
+                accountActivityMonthSummary = (AccountActivitySummary) accountActivitySummary.clone();
+            }
+            else if (accountActivityMonthSummary.getAccountId().compareTo(accountActivitySummary.getAccountId()) != 0)  {
+
+                aasm.append(accountActivityMonthSummary.toString());
+
+                accountActivityMonthSummary = ( AccountActivitySummary) accountActivitySummary.clone();
+            }
+            else {
+                // same account with monthly summary
+                accountActivityMonthSummary.setCdr(accountActivityMonthSummary.getCdr() + accountActivitySummary.getCdr());
+                accountActivityMonthSummary.setRevence(accountActivityMonthSummary.getRevence() + accountActivitySummary.getRevence());
+                accountActivityMonthSummary.setExpiredBalance(accountActivityMonthSummary.getExpiredBalance() + accountActivitySummary.getExpiredBalance());
+                accountActivityMonthSummary.setAdjustment(accountActivityMonthSummary.getAdjustment() + accountActivitySummary.getAdjustment());
+                accountActivityMonthSummary.setAirTime(accountActivityMonthSummary.getAirTime() + accountActivitySummary.getAirTime());
+                accountActivityMonthSummary.setAirTimeBilled(accountActivityMonthSummary.getAirTimeBilled() + accountActivitySummary.getAirTimeBilled());
+                accountActivityMonthSummary.setPrepaidRecharge(accountActivityMonthSummary.getPrepaidRecharge() + accountActivitySummary.getPrepaidRecharge());
+                accountActivityMonthSummary.setCreditRecharge(accountActivityMonthSummary.getCreditRecharge() + accountActivitySummary.getCreditRecharge());
+                accountActivityMonthSummary.setLastBalance(accountActivitySummary.getLastBalance());
+
+                if ((accountActivitySummary.getLastCall().compareToIgnoreCase("NoCalls") != 0) && (accountActivitySummary.getLastCall().length() > 0)){
+                    accountActivityMonthSummary.setLastCall(accountActivitySummary.getLastCall());
                 }
-                else if (accountActivityMonthSummary.getAccountId().compareTo(accountActivitySummary.getAccountId()) != 0)  {
 
-                    accountActivityMonthSummary = accountActivitySummary;
-                }
-                else {
-                    // same account with monthly summary
-                    accountActivityMonthSummary.setCdr(accountActivityMonthSummary.getCdr() + accountActivitySummary.getCdr());
-                    accountActivityMonthSummary.setRevence(accountActivityMonthSummary.getRevence() + accountActivitySummary.getRevence());
-                    accountActivityMonthSummary.setExpiredBalance(accountActivityMonthSummary.getExpiredBalance() + accountActivitySummary.getExpiredBalance());
-                    accountActivityMonthSummary.setAdjustment(accountActivityMonthSummary.getAdjustment() + accountActivitySummary.getAdjustment());
-                    accountActivityMonthSummary.setAirTime(accountActivityMonthSummary.getAirTime() + accountActivitySummary.getAirTime());
-                    accountActivityMonthSummary.setAirTimeBilled(accountActivityMonthSummary.getAirTimeBilled() + accountActivitySummary.getAirTimeBilled());
-                    accountActivityMonthSummary.setPrepaidRecharge(accountActivityMonthSummary.getPrepaidRecharge() + accountActivitySummary.getPrepaidRecharge());
-                    accountActivityMonthSummary.setCreditRecharge(accountActivityMonthSummary.getCreditRecharge() + accountActivitySummary.getCreditRecharge());
-                    accountActivityMonthSummary.setLastBalance(accountActivitySummary.getLastBalance());
-
-                    if ((accountActivitySummary.getLastCall().compareToIgnoreCase("NoCalls") != 0) && (accountActivitySummary.getLastCall().length() > 0)){
-                        accountActivityMonthSummary.setLastCall(accountActivitySummary.getLastCall());
-                    }
-
-
-                }
 
             }
 
-            preparedStmt.close();
-
-            String reportFileName = String.format("/logs/reportfiles/AASM%04d%02d.txt", year, month );
-
-            //System.out.println(sub);
-            writeFile(reportFileName, aasm.toString());
-
-            addReportFile(reportFileName, 5);
-
-        } catch (Exception e) {
-
-            logger.error(e.getMessage());
-
-        }finally {
-
-            try {
-
-                if( rs != null)
-                    rs.close();
-                if(stmt != null)
-                    stmt.close();
-                if(preparedStmt != null )
-                    preparedStmt.close();
-
-            }catch ( Exception e){
-
-                logger.error(e.getMessage());
-            }
         }
+
+        preparedStmt.close();
+
+        query = String.format("select accountid,cdrs,airtimes,airtimesbilled,costs,adjustment," +
+                "prepaidrecharge,creditrecharge,expiredcharge,lastcall,lastbalance,startingbalance " +
+                "from cdr_aas where  substr(cdrdate,0,7) = '%04d/%02d' and accountid not in ( select accountid from bc_account )", year, month);
+
+        preparedStmt = conn.prepareStatement(query);
+        rs = preparedStmt.executeQuery();
+
+        accountActivitySummary = new AccountActivitySummary();
+
+        while(rs.next()) {
+            int i=1;
+            accountActivitySummary.setAccountId(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setCdr(rs.getInt(i));
+            i++;
+            accountActivitySummary.setAirTime(rs.getInt(i));
+            i++;
+            accountActivitySummary.setAirTimeBilled(rs.getInt(i));
+            i++;
+            accountActivitySummary.setRevence(rs.getInt(i));
+            i++;
+            accountActivitySummary.setAdjustment(rs.getInt(i));
+            i++;
+            accountActivitySummary.setPrepaidRecharge(rs.getInt(i));
+            i++;
+            accountActivitySummary.setCreditRecharge(rs.getInt(i));
+            i++;
+            accountActivitySummary.setExpiredBalance(rs.getInt(i));
+            i++;
+            accountActivitySummary.setLastCall(rs.getString(i) == null ? "" : rs.getString(i));
+            i++;
+            accountActivitySummary.setLastBalance(rs.getInt(i));
+            i++;
+            accountActivitySummary.setStartingBalance(rs.getInt(i));
+            i++;
+
+            logger.info("dailyAAS accountId=" + accountActivitySummary.getAccountId() + ",monthlyAAS accountId=" + accountActivityMonthSummary.getAccountId());
+
+            if (accountActivityMonthSummary.getAccountId().length() == 0 ) {
+
+                accountActivityMonthSummary = (AccountActivitySummary) accountActivitySummary.clone();
+            }
+            else if (accountActivityMonthSummary.getAccountId().compareTo(accountActivitySummary.getAccountId()) != 0)  {
+
+                aasm.append(accountActivityMonthSummary.toString());
+
+                accountActivityMonthSummary = ( AccountActivitySummary) accountActivitySummary.clone();
+            }
+            else {
+                // same account with monthly summary
+                accountActivityMonthSummary.setCdr(accountActivityMonthSummary.getCdr() + accountActivitySummary.getCdr());
+                accountActivityMonthSummary.setRevence(accountActivityMonthSummary.getRevence() + accountActivitySummary.getRevence());
+                accountActivityMonthSummary.setExpiredBalance(accountActivityMonthSummary.getExpiredBalance() + accountActivitySummary.getExpiredBalance());
+                accountActivityMonthSummary.setAdjustment(accountActivityMonthSummary.getAdjustment() + accountActivitySummary.getAdjustment());
+                accountActivityMonthSummary.setAirTime(accountActivityMonthSummary.getAirTime() + accountActivitySummary.getAirTime());
+                accountActivityMonthSummary.setAirTimeBilled(accountActivityMonthSummary.getAirTimeBilled() + accountActivitySummary.getAirTimeBilled());
+                accountActivityMonthSummary.setPrepaidRecharge(accountActivityMonthSummary.getPrepaidRecharge() + accountActivitySummary.getPrepaidRecharge());
+                accountActivityMonthSummary.setCreditRecharge(accountActivityMonthSummary.getCreditRecharge() + accountActivitySummary.getCreditRecharge());
+                accountActivityMonthSummary.setLastBalance(accountActivitySummary.getLastBalance());
+
+                if ((accountActivitySummary.getLastCall().compareToIgnoreCase("NoCalls") != 0) && (accountActivitySummary.getLastCall().length() > 0)){
+                    accountActivityMonthSummary.setLastCall(accountActivitySummary.getLastCall());
+                }
+
+            }
+
+        }
+        preparedStmt.close();
+
+        String reportFileName = String.format( reportLocation + "AASM%04d%02d.txt", year, month );
+
+        //System.out.println(sub);
+        writeFile(reportFileName, aasm.toString());
+
+        addReportFile(reportFileName, REPORT_TYPE_AASM);
+
+        if( rs != null)
+            rs.close();
+        if(stmt != null)
+            stmt.close();
+        if(preparedStmt != null )
+            preparedStmt.close();
 
 
         return 1;
+    }
+
+    //Account Usage Summary
+    public int generateAUSM( int year, int month) throws SQLException, CloneNotSupportedException {
+
+        StringBuffer ausm = new StringBuffer();
+
+        ausm.append("AccountID,BillingID,MDN,MSID(MIN),CallsIn,RevenueIn,TimesIn,TimesInBilled," +
+                "CallsOut,RevenueOut,TimesOut,TimesOutBilled,CallsLD,RevenueLD,TimesLD,TimesLDBilled," +
+                "CallsInternational,RevenueInternational,TimesInternational,TimesInternationalBilled," +
+                "CallsVMDeposit,RevenueVMDeposit,TimesVMDeposit," +
+                "CallsVMRetrieval,RevenueVMRetrieval,TimesVMRetrieval,TimesVMRetrievalBilled," +
+                "CallsRoaming,RevenueRoaming,TimesRoaming,TimesRoamingBilled,E911Fee,PeriodicFees(NoE911),KBdataUsage,RevenueDownload,RevenueUpload," +
+                "NumSMSSent,NumSMSReceived,RevenueSMSSent,RevenueSMSReceived,NumMMSSent,NumMMSReceived,RevenueMMSSent,RevenueMMSReceived," +
+                "RevenueWAPSetup,RevenueWAPDaily,LastCall,TotalTimes,TotalTimesBilled,TotalRevenue,Template,RatePlanID,CarrierID\r\n");
+
+        String query = "select M.accountid,M.mdn,M.msid,M.billingid,M.template,M.rateplanid,M.carrierid, " +
+                " callsin,timesin,timesinbilled,costsin," +
+                "callsout,timesout,timesoutbilled,costsout," +
+                "callsld,timesld,timesldbilled,costsld," +
+                "callsoversea,timesoversea,timesoverseabilled,costsoversea," +
+                "callsvmdeposit,timesvmdeposit,costsvmdeposit," +
+                "callsvmretrieval,timesvmretrieval,timesvmretrievalbilled,costsvmretrieval, " +
+                "callsroaming,timesroaming,timesroamingbilled,costsroaming, " +
+                "costsdownload,costsupload, " +
+                "numsmssent,numsmsreceived,costssmssent,costssmsreceived," +
+                "nummmssent,nummmsreceived,costsmmssent,costsmmsreceived,  " +
+                "costswapsetup,costswapdaily,lastcall,totaltimes," +
+                "totaltimesbilled,totalcosts,monthlyfee,e911fee,kbdata " +
+                " from (select c.accountid,a.mdn,a.msid,a.billingid,b.template,c.rateplanid,a.carrierid " +
+                " from client a,contactdata b,bc_account c " +
+                "where a.clientid = b.userid and a.clientid = c.accountid) M " +
+                " left outer join (select * from cdr_aub where substr(cdrdate,0,7) = ? order by accountid,cdrdate asc ) N on M.accountid = N.accountid";
+
+        preparedStmt = conn.prepareStatement(query);
+        preparedStmt.setString(1, String.format("%04d/%02d", year, month));
+        rs = preparedStmt.executeQuery();
+
+        AccountUsageSummary accountUsageSummary = new AccountUsageSummary();
+        AccountUsageSummary accountUsageMonthSummary = new AccountUsageSummary();
+
+        while(rs.next()) {
+            int i=1;
+            accountUsageSummary.setAccountId(rs.getString(i) == null ? "" : rs.getString(i)); i++;
+            accountUsageSummary.setMdn(rs.getString(i) == null ? "" : rs.getString(i)); i++;
+            accountUsageSummary.setMsid(rs.getString(i) == null ? "" : rs.getString(i)); i++;
+            accountUsageSummary.setBillingId(rs.getString(i) == null ? "" : rs.getString(i));  i++;
+            accountUsageSummary.setTemplate(rs.getString(i) == null ? "" : rs.getString(i));  i++;
+            accountUsageSummary.setRatePlanID(rs.getInt(i));  i++;
+            accountUsageSummary.setCarrierID(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCallsIn(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesIn(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesInBilled(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsIn(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCallsOut(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesOut(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesOutBilled(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsOut(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCallsLD(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesLD(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesLDBilled(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsLD(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCallsOversea(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesOversea(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesOverseaBilled(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsOversea(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCallsVMDeposit(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesVMDeposit(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsVMDeposit(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCallsVMRetrieval(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesVMRetrieval(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesVMRetrievalBilled(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsVMRetrieval(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCallsRoaming(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesRoaming(rs.getInt(i));  i++;
+            accountUsageSummary.setTimesRoamingBilled(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsRoaming(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCostsDownload(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsUpload(rs.getInt(i));  i++;
+
+            accountUsageSummary.setNumMMSSent(rs.getInt(i));  i++;
+            accountUsageSummary.setNumSMSReceived(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsSMSSent(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsSMSReceived(rs.getInt(i));  i++;
+
+            accountUsageSummary.setNumMMSSent(rs.getInt(i));  i++;
+            accountUsageSummary.setNumMMSReceived(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsMMSSent(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsMMSReceived(rs.getInt(i));  i++;
+
+            accountUsageSummary.setCostsWAPSetup(rs.getInt(i));  i++;
+            accountUsageSummary.setCostsWAPSetup(rs.getInt(i));  i++;
+
+            accountUsageSummary.setLastCall(rs.getString(i) == null ? "NoCalls" : rs.getString(i)); i++;
+            accountUsageSummary.setTotalTimes(rs.getInt(i));  i++;
+            accountUsageSummary.setTotalTimesBilled(rs.getInt(i));  i++;
+            accountUsageSummary.setTotalCosts(rs.getInt(i));  i++;
+
+            accountUsageSummary.setMonthlyFee(rs.getInt(i));  i++;
+            accountUsageSummary.setE911Fee(rs.getInt(i));  i++;
+            accountUsageSummary.setKbData(rs.getInt(i));  i++;
+
+            if(accountUsageSummary.getAccountId().length() == 0 ) {
+
+                accountUsageMonthSummary = (AccountUsageSummary)accountUsageSummary.clone();
+            }
+            else if (accountUsageMonthSummary.getAccountId().compareTo(accountUsageSummary.getAccountId()) != 0){
+
+                ausm.append(accountUsageMonthSummary.toString());
+                accountUsageMonthSummary = (AccountUsageSummary)accountUsageSummary.clone();
+            }
+            else {
+
+                accountUsageMonthSummary.setCallsIn(accountUsageSummary.getCallsIn() + accountUsageMonthSummary.getCallsIn());
+                accountUsageMonthSummary.setCallsOut(accountUsageSummary.getCallsOut() + accountUsageMonthSummary.getCallsOut());
+                accountUsageMonthSummary.setCallsLD(accountUsageSummary.getCallsLD() + accountUsageMonthSummary.getCallsLD());
+                accountUsageMonthSummary.setCallsOversea(accountUsageSummary.getCallsOversea() + accountUsageMonthSummary.getCallsOversea());
+                accountUsageMonthSummary.setCallsRoaming(accountUsageSummary.getCallsRoaming() + accountUsageMonthSummary.getCallsRoaming());
+                accountUsageMonthSummary.setCallsVMRetrieval(accountUsageSummary.getCallsVMRetrieval() + accountUsageMonthSummary.getCallsVMRetrieval());
+                accountUsageMonthSummary.setCallsVMDeposit(accountUsageSummary.getCallsVMDeposit() + accountUsageMonthSummary.getCallsVMDeposit());
+
+                accountUsageMonthSummary.setCostsIn(accountUsageSummary.getCostsIn() + accountUsageMonthSummary.getCostsIn());
+                accountUsageMonthSummary.setCostsOut(accountUsageSummary.getCostsOut() + accountUsageMonthSummary.getCostsOut());
+                accountUsageMonthSummary.setCostsLD(accountUsageSummary.getCostsLD() + accountUsageMonthSummary.getCostsLD());
+                accountUsageMonthSummary.setCostsOversea(accountUsageSummary.getCostsOversea() + accountUsageMonthSummary.getCostsOversea());
+                accountUsageMonthSummary.setCostsRoaming(accountUsageSummary.getCostsRoaming() + accountUsageMonthSummary.getCostsRoaming());
+                accountUsageMonthSummary.setCostsVMRetrieval(accountUsageSummary.getCostsVMRetrieval() + accountUsageMonthSummary.getCostsVMRetrieval());
+                accountUsageMonthSummary.setCostsVMDeposit(accountUsageSummary.getCostsVMDeposit() + accountUsageMonthSummary.getCostsVMDeposit());
+
+
+                accountUsageMonthSummary.setTimesIn(accountUsageSummary.getTimesIn() + accountUsageMonthSummary.getTimesIn());
+                accountUsageMonthSummary.setTimesOut(accountUsageSummary.getTimesOut() + accountUsageMonthSummary.getTimesOut());
+                accountUsageMonthSummary.setTimesLD(accountUsageSummary.getTimesLD() + accountUsageMonthSummary.getTimesLD());
+                accountUsageMonthSummary.setTimesOversea(accountUsageSummary.getTimesOversea() + accountUsageMonthSummary.getTimesOversea());
+                accountUsageMonthSummary.setTimesRoaming(accountUsageSummary.getTimesRoaming() + accountUsageMonthSummary.getTimesRoaming());
+                accountUsageMonthSummary.setTimesVMRetrieval(accountUsageSummary.getTimesVMRetrieval() + accountUsageMonthSummary.getTimesVMRetrieval());
+                accountUsageMonthSummary.setTimesVMDeposit(accountUsageSummary.getTimesVMDeposit() + accountUsageMonthSummary.getTimesVMDeposit());
+
+                accountUsageMonthSummary.setTimesInBilled(accountUsageSummary.getTimesInBilled() + accountUsageMonthSummary.getTimesInBilled());
+                accountUsageMonthSummary.setTimesOutBilled(accountUsageSummary.getTimesOutBilled() + accountUsageMonthSummary.getTimesOutBilled());
+                accountUsageMonthSummary.setTimesLDBilled(accountUsageSummary.getTimesLDBilled() + accountUsageMonthSummary.getTimesLDBilled());
+                accountUsageMonthSummary.setTimesOverseaBilled(accountUsageSummary.getTimesOverseaBilled() + accountUsageMonthSummary.getTimesOverseaBilled());
+                accountUsageMonthSummary.setTimesRoamingBilled(accountUsageSummary.getTimesRoamingBilled() + accountUsageMonthSummary.getTimesRoamingBilled());
+                accountUsageMonthSummary.setTimesVMRetrievalBilled(accountUsageSummary.getTimesVMRetrievalBilled() + accountUsageMonthSummary.getTimesVMRetrievalBilled());
+
+                accountUsageMonthSummary.setNumMMSSent(accountUsageSummary.getNumMMSSent() + accountUsageMonthSummary.getNumMMSSent());
+                accountUsageMonthSummary.setNumMMSReceived(accountUsageSummary.getNumMMSReceived() + accountUsageMonthSummary.getNumMMSReceived());
+                accountUsageMonthSummary.setNumSMSSent(accountUsageSummary.getNumSMSSent() + accountUsageMonthSummary.getNumSMSSent());
+                accountUsageMonthSummary.setNumSMSReceived(accountUsageSummary.getNumSMSReceived() + accountUsageMonthSummary.getNumSMSReceived());
+
+                accountUsageMonthSummary.setCostsMMSReceived(accountUsageSummary.getCostsMMSReceived() + accountUsageMonthSummary.getCostsMMSReceived());
+                accountUsageMonthSummary.setCostsMMSSent(accountUsageSummary.getCostsMMSSent() + accountUsageMonthSummary.getCostsMMSSent());
+                accountUsageMonthSummary.setCostsSMSReceived(accountUsageSummary.getCostsSMSReceived() + accountUsageMonthSummary.getCostsSMSReceived());
+                accountUsageMonthSummary.setCostsSMSSent(accountUsageSummary.getCostsSMSSent() + accountUsageMonthSummary.getCostsSMSSent());
+
+                accountUsageMonthSummary.setCostsWAPSetup(accountUsageSummary.getCostsWAPSetup() + accountUsageMonthSummary.getCostsWAPSetup());
+                accountUsageMonthSummary.setCostsWAPDaily(accountUsageSummary.getCostsWAPDaily() + accountUsageMonthSummary.getCostsWAPDaily());
+                accountUsageMonthSummary.setCostsDownload(accountUsageSummary.getCostsDownload() + accountUsageMonthSummary.getCostsDownload());
+                accountUsageMonthSummary.setCostsUpload(accountUsageSummary.getCostsUpload() + accountUsageMonthSummary.getCostsUpload());
+
+                accountUsageMonthSummary.setKbData(accountUsageSummary.getKbData() + accountUsageMonthSummary.getKbData());
+                accountUsageMonthSummary.setE911Fee(accountUsageSummary.getE911Fee() + accountUsageMonthSummary.getE911Fee());
+                accountUsageMonthSummary.setMonthlyFee(accountUsageSummary.getMonthlyFee() + accountUsageMonthSummary.getMonthlyFee());
+
+                accountUsageMonthSummary.setTotalCosts(accountUsageSummary.getTotalCosts() + accountUsageMonthSummary.getTotalCosts());
+                accountUsageMonthSummary.setTotalTimesBilled(accountUsageSummary.getTotalTimesBilled() + accountUsageMonthSummary.getTotalTimesBilled());
+                accountUsageMonthSummary.setTotalTimes(accountUsageSummary.getTotalTimes() + accountUsageMonthSummary.getTotalTimes());
+
+            }
+        }
+
+        if( rs != null)
+            rs.close();
+        if(stmt != null)
+            stmt.close();
+        if(preparedStmt != null )
+            preparedStmt.close();
+
+        return 0;
     }
 
     public int generateSubscriberInfo() {
@@ -563,7 +821,14 @@ public class PrimalTool {
 
             reportFile.length();
 
-            String query = "insert into dbm_report (dbmDateTime, ReportFile, ReportType, FileSize) values (?,?,?,?)";
+            String query = "delete dbm_report where reportfile = ? and reporttype = ?";
+            preparedStmt = conn.prepareStatement(query);
+            preparedStmt.setString(1, reportFileName);
+            preparedStmt.setInt(2, reportType);
+
+            preparedStmt.executeUpdate();
+
+            query = "insert into dbm_report (dbmDateTime, ReportFile, ReportType, FileSize) values (?,?,?,?)";
 
             String timeStamp = new SimpleDateFormat("yyyy/MM/dd-HH:mm:ss").format(new java.util.Date());
 

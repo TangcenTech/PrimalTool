@@ -1,28 +1,28 @@
-package com.primal;
+package com.primal.model;
 
-public class AccountActivitySummary {
-    private String accountId;
-    private String billingId;
-    private String mdn;
-    private String mdn2;
-    private String msid;
-    private String esn;
-    private int cdr;
-    private int airTime;
-    private int airTimeBilled;
-    private int revence;
-    private int adjustment;
-    private int prepaidRecharge;
-    private int creditRecharge;
-    private int expiredBalance;
-    private String lastCall;
-    private int lastBalance;
-    private int startingBalance;
-    private String activationDate;
-    private String expiryDate;
-    private String template;
-    private int rateplanId;
-    private int status;
+public class AccountActivitySummary implements Cloneable {
+    private String accountId ="";
+    private String billingId ="";
+    private String mdn ="";
+    private String mdn2 ="";
+    private String msid ="";
+    private String esn ="";
+    private int cdr = 0;
+    private int airTime = 0;
+    private int airTimeBilled = 0;
+    private int revence = 0;
+    private int adjustment = 0;
+    private int prepaidRecharge = 0;
+    private int creditRecharge = 0;
+    private int expiredBalance = 0;
+    private String lastCall = "";
+    private int lastBalance = 0;
+    private int startingBalance = 0;
+    private String activationDate = "";
+    private String expiryDate = "";
+    private String template = "";
+    private int rateplanId = 0;
+    private int status = 0;
 
     public String getAccountId() {
         return accountId;
@@ -201,30 +201,27 @@ public class AccountActivitySummary {
     }
 
     @Override
+    public Object clone() throws CloneNotSupportedException {
+        return (AccountActivitySummary)super.clone();
+    }
+
+    @Override
     public String toString() {
-        return "AccountActivitySummary{" +
-                "accountId='" + accountId + '\'' +
-                ", billingId='" + billingId + '\'' +
-                ", mdn='" + mdn + '\'' +
-                ", mdn2='" + mdn2 + '\'' +
-                ", msid='" + msid + '\'' +
-                ", esn='" + esn + '\'' +
-                ", cdr=" + cdr +
-                ", airTime=" + airTime +
-                ", airTimeBilled=" + airTimeBilled +
-                ", revence=" + revence +
-                ", adjustment=" + adjustment +
-                ", prepaidRecharge=" + prepaidRecharge +
-                ", creditRecharge=" + creditRecharge +
-                ", expiredBalance=" + expiredBalance +
-                ", lastCall='" + lastCall + '\'' +
-                ", lastBalance=" + lastBalance +
-                ", startingBalance=" + startingBalance +
-                ", activationDate='" + activationDate + '\'' +
-                ", expiryDate='" + expiryDate + '\'' +
-                ", template='" + template + '\'' +
-                ", rateplanId=" + rateplanId +
-                ", status=" + status +
-                '}';
+        return accountId + ',' + billingId + ',' + mdn + ',' + mdn2 + ',' + msid + ',' +  esn + ',' +  cdr +  ','
+                 + airTime + ','
+                 + airTimeBilled + ','
+                 + revence + ','
+                 + adjustment + ','
+                 + prepaidRecharge + ','
+                 + creditRecharge + ','
+                 + expiredBalance + ','
+                 + lastCall + ','
+                 + lastBalance + ','
+                 + startingBalance + ','
+                 + activationDate + ','
+                 + expiryDate + ','
+                 + template + ','
+                 + rateplanId + ','
+                 + status +"\r\n";
     }
 }
